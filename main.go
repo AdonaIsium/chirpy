@@ -53,9 +53,9 @@ func main() {
 	}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", fsHandler)
-	mux.HandleFunc("GET /metrics", apiCfg.getHitsCounter)
-	mux.HandleFunc("POST /reset", apiCfg.resetHitsCounter)
-	mux.HandleFunc("GET /healthz", app.ServerReadiness)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.adminMetrics)
+	mux.HandleFunc("POST /admin/reset", apiCfg.resetHitsCounter)
+	mux.HandleFunc("GET /api/healthz", app.ServerReadiness)
 
 	addr := ":" + port
 
