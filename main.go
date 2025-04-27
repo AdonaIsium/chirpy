@@ -55,6 +55,7 @@ func main() {
 	mux.Handle("/app/", fsHandler)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.adminMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHitsCounter)
+	mux.HandleFunc("POST /api/validate_chirp", apiCfg.validateChirp)
 	mux.HandleFunc("GET /api/healthz", app.ServerReadiness)
 
 	addr := ":" + port
