@@ -37,25 +37,25 @@ func (cfg *apiConfig) resetHitsCounter(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	apiCfg := apiConfig{}
+	const filepathRoot = "."
+	apiCfg := apiConfig{
+		fileserverHits: atomic.Int32{},
+	}
 
-	fs := http.FileServer(http.Dir("."))
-	appFS := http.StripPrefix("/app/", fs)
 	if err := godotenv.Load(); err != nil {
 		log.Println("warning, no .env file found")
 	}
+	fsHandler := apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(filepathRoot))))
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 	mux := http.NewServeMux()
-	mux.Handle("/app/", apiCfg.middlewareMetricsInc(appFS))
-	mux.Handle("/", apiCfg.middlewareMetricsInc(appFS))
-	mux.Handle("/assets/", apiCfg.middlewareMetricsInc(appFS))
-	mux.HandleFunc("/metrics", apiCfg.getHitsCounter)
-	mux.HandleFunc("/reset", apiCfg.resetHitsCounter)
-	mux.HandleFunc("/healthz", app.ServerReadiness)
+	mux.Handle("/app/", fsHandler)
+	mux.HandleFunc("GET /metrics", apiCfg.getHitsCounter)
+	mux.HandleFunc("POST /reset", apiCfg.resetHitsCounter)
+	mux.HandleFunc("GET /healthz", app.ServerReadiness)
 
 	addr := ":" + port
 
