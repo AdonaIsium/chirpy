@@ -10,6 +10,8 @@ type MetricsData struct {
 }
 
 func (cfg *apiConfig) adminMetrics(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
 	const tpl = `
 <!DOCTYPE html>
 <html>
