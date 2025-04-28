@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -83,5 +84,53 @@ func (cfg *apiConfig) handleChirp(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: newChirp.UpdatedAt,
 		Body:      newChirp.Body,
 		UserID:    newChirp.UserID,
+	})
+}
+
+func (cfg apiConfig) handleGetAllChirps(w http.ResponseWriter, r *http.Request) {
+	chirps, err := cfg.db.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error Getting all Chirps", err)
+		return
+	}
+	resp := make([]ChirpResponse, len(chirps))
+	for i, c := range chirps {
+		resp[i] = ChirpResponse{
+			ID:        c.ID,
+			CreatedAt: c.CreatedAt,
+			UpdatedAt: c.UpdatedAt,
+			Body:      c.Body,
+			UserID:    c.UserID,
+		}
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
+}
+
+func (cfg apiConfig) handleGetChirp(w http.ResponseWriter, r *http.Request) {
+	chirpIDStr := strings.TrimPrefix(r.URL.Path, "/api/chirps/")
+	if chirpIDStr == "" {
+		respondWithError(w, http.StatusBadRequest, "Missing chirp ID", nil)
+		return
+	}
+	fmt.Printf(chirpIDStr)
+
+	chirpID, err := uuid.Parse(chirpIDStr)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to resolve ID into UUID", err)
+	}
+
+	chirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error Getting Chirp", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, ChirpResponse{
+		ID:        chirp.ID,
+		CreatedAt: chirp.CreatedAt,
+		UpdatedAt: chirp.UpdatedAt,
+		Body:      chirp.Body,
+		UserID:    chirp.UserID,
 	})
 }
