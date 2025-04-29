@@ -5,10 +5,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AdonaIsium/chirpy/internal/auth"
+	"github.com/AdonaIsium/chirpy/internal/database"
 	"github.com/google/uuid"
 )
 
-type UserCreationResp struct {
+type User struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -17,10 +19,11 @@ type UserCreationResp struct {
 
 func (cfg *apiConfig) handleUserSubmission(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	type response struct {
-		UserCreationResp
+		User
 	}
 	decoder := json.NewDecoder(r.Body)
 	params := parameters{}
@@ -35,13 +38,24 @@ func (cfg *apiConfig) handleUserSubmission(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	user, err := cfg.db.CreateUser(r.Context(), params.Email)
+	if params.Password == "" {
+		respondWithError(w, http.StatusBadRequest, "Submitted password was empty", nil)
+		return
+	}
+
+	hashedPassword, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error while hashing password", err)
+		return
+	}
+
+	user, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{Email: params.Email, HashedPassword: hashedPassword})
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error creating DB entry", err)
 		return
 	}
 	respondWithJSON(w, http.StatusCreated, response{
-		UserCreationResp: UserCreationResp{
+		User: User{
 			ID:        user.ID,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,

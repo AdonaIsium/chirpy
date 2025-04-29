@@ -4,8 +4,8 @@ VALUES ( gen_random_uuid(), NOW(), NOW(), $1, $2 )
 RETURNING *;
 
 -- name: GetAllChirps :many
-SELECT id, created_at, updated_at, body, user_id FROM chirps
+SELECT * FROM chirps
 ORDER BY created_at ASC;
 
 -- name: GetChirp :one
-SELECT id, created_at, updated_at, body, user_id FROM chirps WHERE ID = $1;
+SELECT * FROM chirps WHERE ID = $1;

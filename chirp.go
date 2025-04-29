@@ -2,135 +2,139 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"log"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/AdonaIsium/chirpy/internal/auth"
 	"github.com/AdonaIsium/chirpy/internal/database"
 	"github.com/google/uuid"
 )
 
 type Chirp struct {
-	Body   string    `json:"body"`
-	UserID uuid.UUID `json:"user_id"`
-}
-type ErrorResp struct {
-	Error string `json:"error"`
-}
-type CleanedChirp struct {
-	CleanedBody string `json:"cleaned_body"`
-}
-type ChirpResponse struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	Body      string    `json:"body"`
 	UserID    uuid.UUID `json:"user_id"`
+	Body      string    `json:"body"`
 }
 
-func (cfg *apiConfig) handleChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *apiConfig) handlerChirpsCreate(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body string `json:"body"`
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT", err)
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
+		return
+	}
+
 	decoder := json.NewDecoder(r.Body)
-	chirp := Chirp{}
-	err := decoder.Decode(&chirp)
+	params := parameters{}
+	err = decoder.Decode(&params)
 	if err != nil {
-		log.Printf("Error decoding chirp: %s", err)
-		w.WriteHeader(http.StatusInternalServerError)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
 	}
 
-	if len(chirp.Body) > 140 {
-		log.Printf("Chirp must be less than 140 chars. Received %d", len(chirp.Body))
-		errorResp := ErrorResp{
-			Error: "Chirp is too long",
-		}
-		jsonResp, err := json.Marshal(errorResp)
-		if err != nil {
-			log.Printf("Error encoding error: %s", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		w.Write(jsonResp)
-		return
-	}
-
-	splitChirp := strings.Split(chirp.Body, " ")
-	profaneWords := []string{"kerfuffle", "sharbert", "fornax"}
-	for i, word := range splitChirp {
-		for _, profanity := range profaneWords {
-			if strings.ToLower(word) == profanity {
-				splitChirp[i] = "****"
-			}
-		}
-	}
-	cleanedBody := strings.Join(splitChirp, " ")
-
-	cleanedChirp := CleanedChirp{
-		CleanedBody: cleanedBody,
-	}
-
-	newChirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{Body: cleanedChirp.CleanedBody, UserID: chirp.UserID})
+	cleaned, err := validateChirp(params.Body)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error creating DB entry for chirp", err)
+		respondWithError(w, http.StatusBadRequest, err.Error(), err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusCreated, ChirpResponse{
-		ID:        newChirp.ID,
-		CreatedAt: newChirp.CreatedAt,
-		UpdatedAt: newChirp.UpdatedAt,
-		Body:      newChirp.Body,
-		UserID:    newChirp.UserID,
+	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
+		Body:   cleaned,
+		UserID: userID,
 	})
-}
-
-func (cfg apiConfig) handleGetAllChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.db.GetAllChirps(r.Context())
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error Getting all Chirps", err)
-		return
-	}
-	resp := make([]ChirpResponse, len(chirps))
-	for i, c := range chirps {
-		resp[i] = ChirpResponse{
-			ID:        c.ID,
-			CreatedAt: c.CreatedAt,
-			UpdatedAt: c.UpdatedAt,
-			Body:      c.Body,
-			UserID:    c.UserID,
-		}
-	}
-
-	respondWithJSON(w, http.StatusOK, resp)
-}
-
-func (cfg apiConfig) handleGetChirp(w http.ResponseWriter, r *http.Request) {
-	chirpIDStr := strings.TrimPrefix(r.URL.Path, "/api/chirps/")
-	if chirpIDStr == "" {
-		respondWithError(w, http.StatusBadRequest, "Missing chirp ID", nil)
-		return
-	}
-	fmt.Printf(chirpIDStr)
-
-	chirpID, err := uuid.Parse(chirpIDStr)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to resolve ID into UUID", err)
-	}
-
-	chirp, err := cfg.db.GetChirp(r.Context(), chirpID)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error Getting Chirp", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create chirp", err)
 		return
 	}
 
-	respondWithJSON(w, http.StatusOK, ChirpResponse{
+	respondWithJSON(w, http.StatusCreated, Chirp{
 		ID:        chirp.ID,
 		CreatedAt: chirp.CreatedAt,
 		UpdatedAt: chirp.UpdatedAt,
 		Body:      chirp.Body,
 		UserID:    chirp.UserID,
 	})
+}
+
+func validateChirp(body string) (string, error) {
+	const maxChirpLength = 140
+	if len(body) > maxChirpLength {
+		return "", errors.New("Chirp is too long")
+	}
+
+	badWords := map[string]struct{}{
+		"kerfuffle": {},
+		"sharbert":  {},
+		"fornax":    {},
+	}
+	cleaned := getCleanedBody(body, badWords)
+	return cleaned, nil
+}
+
+func getCleanedBody(body string, badWords map[string]struct{}) string {
+	words := strings.Split(body, " ")
+	for i, word := range words {
+		loweredWord := strings.ToLower(word)
+		if _, ok := badWords[loweredWord]; ok {
+			words[i] = "****"
+		}
+	}
+	cleaned := strings.Join(words, " ")
+	return cleaned
+}
+
+func (cfg *apiConfig) handlerChirpsGet(w http.ResponseWriter, r *http.Request) {
+	chirpIDString := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(chirpIDString)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid chirp ID", err)
+		return
+	}
+
+	dbChirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't get chirp", err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, Chirp{
+		ID:        dbChirp.ID,
+		CreatedAt: dbChirp.CreatedAt,
+		UpdatedAt: dbChirp.UpdatedAt,
+		UserID:    dbChirp.UserID,
+		Body:      dbChirp.Body,
+	})
+}
+
+func (cfg *apiConfig) handlerChirpsRetrieve(w http.ResponseWriter, r *http.Request) {
+	dbChirps, err := cfg.db.GetAllChirps(r.Context())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't retrieve chirps", err)
+		return
+	}
+
+	chirps := []Chirp{}
+	for _, dbChirp := range dbChirps {
+		chirps = append(chirps, Chirp{
+			ID:        dbChirp.ID,
+			CreatedAt: dbChirp.CreatedAt,
+			UpdatedAt: dbChirp.UpdatedAt,
+			UserID:    dbChirp.UserID,
+			Body:      dbChirp.Body,
+		})
+	}
+
+	respondWithJSON(w, http.StatusOK, chirps)
 }
